@@ -177,3 +177,80 @@ func TestMetricsEndpoint(t *testing.T) {
 		t.Errorf("expected 200 OK, got %d", w.Result().StatusCode)
 	}
 }
+
+func TestDeployWithoutAuth(t *testing.T) {
+	hs := health.NewService()
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/deploy", nil)
+	w := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestDeployWithInvalidToken(t *testing.T) {
+	hs := health.NewService()
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/deploy", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	w := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestDeployWithValidToken(t *testing.T) {
+	hs := health.NewService()
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"regions": []string{"iad"},
+		"image":   "test-image",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/deploy", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(w, req)
+
+	// Currently returns 501 — server-side deploy is stub.
+	if w.Result().StatusCode != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestRegionsEndpoint(t *testing.T) {
+	hs := health.NewService()
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/regions", nil)
+	w := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", w.Result().StatusCode)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Result().Body).Decode(&body); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	regions, ok := body["regions"]
+	if !ok {
+		t.Fatal("expected regions in response")
+	}
+	regionList, ok := regions.([]interface{})
+	if !ok || len(regionList) == 0 {
+		t.Fatal("expected non-empty regions list")
+	}
+}

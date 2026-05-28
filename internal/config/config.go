@@ -26,8 +26,9 @@ type Config struct {
 	MetricsAddr string // Prometheus metrics listen address (default: :9090)
 
 	// Fly.io configuration.
-	FlyAppName string // Fly app name
-	FlyOrg     string // Fly organization
+	FlyAppName  string // Fly app name
+	FlyOrg      string // Fly organization
+	FlyAPIToken string // Fly.io API token (required for deploy)
 
 	// Relay mode configuration (experimental).
 	RelayMode  bool     // Enable experimental relay-pair mode
@@ -77,6 +78,9 @@ func (c *Config) LoadFromEnv() {
 	}
 	if v := os.Getenv("FLY_ORG"); v != "" {
 		c.FlyOrg = v
+	}
+	if v := os.Getenv("FLY_API_TOKEN"); v != "" {
+		c.FlyAPIToken = v
 	}
 	if v := os.Getenv("RELAY_MODE"); v != "" {
 		c.RelayMode = strings.EqualFold(v, "true") || v == "1"
