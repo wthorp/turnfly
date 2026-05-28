@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/nousresearch/turnfly/internal/health"
+	"github.com/nousresearch/turnfly/internal/regions"
 )
 
 func TestNewServer(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("secret", "token", 1*time.Hour, hs, nil)
+	s := NewServer("secret", "token", 1*time.Hour, hs, nil, nil)
 	if s == nil {
 		t.Fatal("expected non-nil server")
 	}
@@ -21,7 +22,7 @@ func TestNewServer(t *testing.T) {
 
 func TestPostCredentials(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	body := CredentialsRequest{
 		UserID:   "user123",
@@ -58,7 +59,7 @@ func TestPostCredentials(t *testing.T) {
 
 func TestPostCredentialsMissingUserID(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	body := CredentialsRequest{}
 	bodyJSON, _ := json.Marshal(body)
@@ -76,7 +77,7 @@ func TestPostCredentialsMissingUserID(t *testing.T) {
 
 func TestPostCredentialsDefaultValidity(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 24*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 24*time.Hour, hs, nil, nil)
 
 	body := CredentialsRequest{
 		UserID: "user456",
@@ -106,7 +107,7 @@ func TestPostCredentialsDefaultValidity(t *testing.T) {
 
 func TestPostCredentialsMethodNotAllowed(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/credentials", nil)
 	w := httptest.NewRecorder()
@@ -120,7 +121,7 @@ func TestPostCredentialsMethodNotAllowed(t *testing.T) {
 
 func TestPostCredentialsInvalidJSON(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/credentials", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -138,7 +139,7 @@ func TestHealthzEndpoint(t *testing.T) {
 	hs.Register("test", func() (health.Status, string) {
 		return health.StatusHealthy, "ok"
 	})
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -152,7 +153,7 @@ func TestHealthzEndpoint(t *testing.T) {
 
 func TestReadyzEndpoint(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	w := httptest.NewRecorder()
@@ -166,7 +167,7 @@ func TestReadyzEndpoint(t *testing.T) {
 
 func TestMetricsEndpoint(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -180,7 +181,7 @@ func TestMetricsEndpoint(t *testing.T) {
 
 func TestDeployWithoutAuth(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/deploy", nil)
 	w := httptest.NewRecorder()
@@ -194,7 +195,7 @@ func TestDeployWithoutAuth(t *testing.T) {
 
 func TestDeployWithInvalidToken(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/deploy", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
@@ -209,7 +210,7 @@ func TestDeployWithInvalidToken(t *testing.T) {
 
 func TestDeployWithValidToken(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"regions": []string{"iad"},
@@ -230,7 +231,7 @@ func TestDeployWithValidToken(t *testing.T) {
 
 func TestRegionsEndpoint(t *testing.T) {
 	hs := health.NewService()
-	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil)
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/regions", nil)
 	w := httptest.NewRecorder()
@@ -252,5 +253,87 @@ func TestRegionsEndpoint(t *testing.T) {
 	regionList, ok := regions.([]interface{})
 	if !ok || len(regionList) == 0 {
 		t.Fatal("expected non-empty regions list")
+	}
+}
+
+func TestCredentialsWithRegions(t *testing.T) {
+	hs := health.NewService()
+	regionStore := regions.NewStore()
+	regionStore.Set(regions.Region{Code: "iad", Host: "1.2.3.4", Port: 3478})
+	regionStore.Set(regions.Region{Code: "ord", Host: "5.6.7.8", Port: 3478})
+
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, regionStore, nil)
+
+	body := CredentialsRequest{UserID: "user123"}
+	bodyJSON, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/credentials", bytes.NewReader(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Result().StatusCode)
+	}
+
+	var resp CredentialsResponse
+	if err := json.NewDecoder(w.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	if len(resp.URIs) != 2 {
+		t.Fatalf("expected 2 URIs in multi-region response, got %d: %v", len(resp.URIs), resp.URIs)
+	}
+
+	// Each URI should contain the username and password.
+	for _, uri := range resp.URIs {
+		if len(uri) == 0 {
+			t.Error("expected non-empty URI")
+		}
+	}
+}
+
+func TestICEReportMissingRegion(t *testing.T) {
+	hs := health.NewService()
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
+
+	body, _ := json.Marshal(map[string]string{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/ice-report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestICEReportValid(t *testing.T) {
+	hs := health.NewService()
+	s := NewServer("test-secret", "test-token", 1*time.Hour, hs, nil, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"selected_region": "iad",
+		"pair_type":       "relay",
+		"rtt_ms":          42,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/ice-report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp["status"] != "recorded" {
+		t.Errorf("expected recorded, got %s", resp["status"])
 	}
 }

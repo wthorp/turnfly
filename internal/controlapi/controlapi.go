@@ -12,6 +12,7 @@ import (
 	"github.com/nousresearch/turnfly/internal/auth"
 	"github.com/nousresearch/turnfly/internal/health"
 	"github.com/nousresearch/turnfly/internal/metrics"
+	"github.com/nousresearch/turnfly/internal/regions"
 )
 
 // Server holds the control API dependencies and handlers.
@@ -20,12 +21,14 @@ type Server struct {
 	adminToken    string
 	credValidity  time.Duration
 	healthService *health.Service
+	regionStore   *regions.Store
 	logger        *slog.Logger
 	mux           *http.ServeMux
 }
 
-// NewServer creates a new control API server with the given configuration.
-func NewServer(sharedSecret, adminToken string, credValidity time.Duration, hs *health.Service, logger *slog.Logger) *Server {
+// NewServer creates a new control API server.
+// regionStore may be nil if multi-region support is not enabled.
+func NewServer(sharedSecret, adminToken string, credValidity time.Duration, hs *health.Service, regionStore *regions.Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -34,6 +37,7 @@ func NewServer(sharedSecret, adminToken string, credValidity time.Duration, hs *
 		adminToken:    adminToken,
 		credValidity:  credValidity,
 		healthService: hs,
+		regionStore:   regionStore,
 		logger:        logger.With("component", "controlapi"),
 		mux:           http.NewServeMux(),
 	}
@@ -50,6 +54,7 @@ func (s *Server) registerRoutes() {
 	// Admin-protected endpoints.
 	s.mux.Handle("/v1/deploy", s.requireAdmin(s.handleDeploy))
 	s.mux.HandleFunc("/v1/regions", s.handleRegions)
+	s.mux.HandleFunc("/v1/ice-report", s.handleICEReport)
 }
 
 // Handler returns the HTTP handler for the control API.
@@ -101,6 +106,11 @@ func (s *Server) handleCredentials(w http.ResponseWriter, r *http.Request) {
 		TTL:      int(validity.Seconds()),
 	}
 
+	// If multi-region is configured, include TURN URIs for all regions.
+	if s.regionStore != nil && s.regionStore.Count() > 0 {
+		resp.URIs = s.regionStore.GenerateMultiRegionURIs(username, password, false)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
@@ -147,22 +157,80 @@ func (s *Server) handleRegions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stub: return a list of supported Fly regions.
-	// In Phase 3, this will report regions where turnfly is deployed.
-	regions := []map[string]string{
-		{"code": "iad", "name": "Ashburn, Virginia"},
-		{"code": "ord", "name": "Chicago, Illinois"},
-		{"code": "sjc", "name": "Sunnyvale, California"},
-		{"code": "lhr", "name": "London, UK"},
-		{"code": "ams", "name": "Amsterdam, Netherlands"},
-		{"code": "nrt", "name": "Tokyo, Japan"},
-		{"code": "syd", "name": "Sydney, Australia"},
+	// Return deployed regions if available, otherwise well-known regions.
+	wellKnown := regions.WellKnownRegions()
+	result := make([]map[string]string, 0)
+
+	if s.regionStore != nil && s.regionStore.Count() > 0 {
+		for _, r := range s.regionStore.List() {
+			name := wellKnown[r.Code]
+			if name == "" {
+				name = r.Code
+			}
+			result = append(result, map[string]string{
+				"code": r.Code,
+				"name": name,
+				"host": r.Host,
+			})
+		}
+	} else {
+		// Fallback: return well-known Fly regions.
+		for code, name := range wellKnown {
+			result = append(result, map[string]string{
+				"code": code,
+				"name": name,
+			})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"regions": regions,
+		"regions": result,
+	})
+}
+
+// iceReportRequest is the request body for POST /v1/ice-report.
+type iceReportRequest struct {
+	SelectedRegion  string `json:"selected_region"`
+	LocalCandidate  string `json:"local_candidate,omitempty"`
+	RemoteCandidate string `json:"remote_candidate,omitempty"`
+	PairType        string `json:"pair_type,omitempty"` // "relay", "srflx", "host", "prflx"
+	RTTMs           int    `json:"rtt_ms,omitempty"`
+}
+
+func (s *Server) handleICEReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req iceReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.SelectedRegion == "" {
+		writeJSONError(w, http.StatusBadRequest, "selected_region is required")
+		return
+	}
+
+	// Increment region candidate wins metric.
+	metrics.RegionCandidateWinsTotal.WithLabelValues(req.SelectedRegion).Inc()
+
+	if req.PairType != "" {
+		s.logger.Info("ice report",
+			"selected_region", req.SelectedRegion,
+			"pair_type", req.PairType,
+			"rtt_ms", req.RTTMs,
+		)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "recorded",
 	})
 }
 

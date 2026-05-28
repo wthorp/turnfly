@@ -9,45 +9,42 @@ import (
 )
 
 var (
-	// AllocationsActive tracks the current number of active TURN allocations.
 	AllocationsActive = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "turn_allocations_active",
 		Help: "Current number of active TURN allocations.",
 	})
 
-	// AllocationsTotal counts the total number of TURN allocations created.
 	AllocationsTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "turn_allocations_total",
 		Help: "Total number of TURN allocations created.",
 	})
 
-	// BytesInTotal counts total bytes received via TURN.
 	BytesInTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "turn_bytes_in_total",
 		Help: "Total bytes received via TURN relay.",
 	})
 
-	// BytesOutTotal counts total bytes sent via TURN.
 	BytesOutTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "turn_bytes_out_total",
 		Help: "Total bytes sent via TURN relay.",
 	})
 
-	// PacketsDroppedTotal counts total packets dropped.
 	PacketsDroppedTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "turn_packets_dropped_total",
 		Help: "Total number of TURN packets dropped.",
 	})
 
-	// AuthFailuresTotal counts total authentication failures.
 	AuthFailuresTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "turn_auth_failures_total",
 		Help: "Total number of TURN authentication failures.",
 	})
+
+	RegionCandidateWinsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "region_candidate_wins_total",
+		Help: "Total number of times each region was chosen as the winning ICE candidate.",
+	}, []string{"region"})
 )
 
-// Register registers all turnfly metrics with the default Prometheus registry.
-// It panics if a metric collector is already registered (duplicate registration).
 func Register() {
 	prometheus.MustRegister(
 		AllocationsActive,
@@ -56,6 +53,7 @@ func Register() {
 		BytesOutTotal,
 		PacketsDroppedTotal,
 		AuthFailuresTotal,
+		RegionCandidateWinsTotal,
 	)
 }
 

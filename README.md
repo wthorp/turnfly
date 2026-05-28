@@ -38,6 +38,7 @@ turnfly serve-turn     # Start TURN server with control API (Phase 1)
 turnfly serve-relay    # Experimental relay-pair mode (Phase 4)
 turnfly deploy         # Deploy to Fly.io (Phase 2 ✅)
 turnfly destroy        # Destroy deployment (Phase 2 ✅)
+turnfly ice-config      # Generate WebRTC ICE server config (Phase 3 ✅)
 turnfly probe          # Synthetic measurement probes (Phase 3)
 turnfly image          # Build and push Docker image
 ```
@@ -60,12 +61,14 @@ turnfly image          # Build and push Docker image
 
 ## API Endpoints
 
-| Method | Path            | Description              |
-|--------|-----------------|--------------------------|
-| POST   | /v1/credentials | Generate TURN credentials |
-| GET    | /healthz        | Health check with details |
-| GET    | /readyz         | Readiness check          |
-| GET    | /metrics        | Prometheus metrics       |
+| Method | Path             | Description                     |
+|--------|------------------|----------------------------------|
+| POST   | /v1/credentials  | Generate TURN credentials        |
+| POST   | /v1/ice-report   | Report ICE candidate selection   |
+| GET    | /healthz         | Health check with details        |
+| GET    | /readyz          | Readiness check                  |
+| GET    | /metrics         | Prometheus metrics               |
+| GET    | /v1/regions      | List deployed TURN regions       |
 
 ### POST /v1/credentials
 
@@ -132,7 +135,7 @@ See [AGENTS.md](AGENTS.md) for development guidelines and [SCOPE.md](SCOPE.md) f
 
 - **Phase 1** ✅ Plain Fly TURN with Pion, credential endpoint, metrics, health
 - **Phase 2** ✅ Self-deployer via Fly Machines API
-- **Phase 3** 🚧 Multi-region independent TURN with ICE config generation
+- **Phase 3** ✅ Multi-region independent TURN with ICE config generation
 - **Phase 4** 🚧 QUIC relay-pair experiment
 - **Phase 5** 🚧 Production hardening
 

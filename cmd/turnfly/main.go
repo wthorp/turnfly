@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,11 +24,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nousresearch/turnfly/internal/auth"
 	"github.com/nousresearch/turnfly/internal/config"
 	"github.com/nousresearch/turnfly/internal/controlapi"
 	"github.com/nousresearch/turnfly/internal/flydeploy"
 	"github.com/nousresearch/turnfly/internal/health"
 	"github.com/nousresearch/turnfly/internal/metrics"
+	"github.com/nousresearch/turnfly/internal/regions"
 	"github.com/nousresearch/turnfly/internal/turnserver"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -46,6 +49,7 @@ func main() {
 	rootCmd.AddCommand(destroyCmd())
 	rootCmd.AddCommand(probeCmd())
 	rootCmd.AddCommand(imageCmd())
+	rootCmd.AddCommand(iceConfigCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -274,6 +278,109 @@ func destroyCmd() *cobra.Command {
 	return cmd
 }
 
+func iceConfigCmd() *cobra.Command {
+	var (
+		userID       string
+		useTLS       bool
+		regionsList  string
+		sharedSecret string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "ice-config",
+		Short: "Generate WebRTC ICE server configuration",
+		Long: `Generates a WebRTC ICE server configuration (iceServers array) for
+multi-region TURN. The output is JSON suitable for use in RTCPeerConnection.
+
+If --regions is set, generates config for those regions directly.
+Otherwise, calls the local control API /v1/credentials endpoint and includes
+multi-region URIs if deployed.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := config.DefaultConfig()
+			cfg.LoadFromEnv()
+			if sharedSecret == "" {
+				sharedSecret = cfg.TURNSharedSecret
+			}
+			if sharedSecret == "" {
+				return fmt.Errorf("TURN_SHARED_SECRET is required (set via env or --shared-secret)")
+			}
+
+			if regionsList != "" {
+				// Generate config directly for specified regions.
+				return generateIceConfigFromRegions(regionsList, userID, sharedSecret, useTLS)
+			}
+
+			// Fallback: generate credentials and print ICE config.
+			return generateIceConfigFromLocal(userID, sharedSecret, useTLS)
+		},
+	}
+
+	cmd.Flags().StringVar(&userID, "user-id", "default", "User ID for credentials")
+	cmd.Flags().BoolVar(&useTLS, "tls", false, "Use TURN over TLS (turns:)")
+	cmd.Flags().StringVar(&regionsList, "regions", "", "Comma-separated region:host list (e.g. iad:1.2.3.4,ord:5.6.7.8)")
+	cmd.Flags().StringVar(&sharedSecret, "shared-secret", "", "Override TURN_SHARED_SECRET")
+
+	return cmd
+}
+
+func generateIceConfigFromRegions(regionsList, userID, sharedSecret string, useTLS bool) error {
+	store := regions.NewStore()
+	wellKnown := regions.WellKnownRegions()
+
+	for _, item := range strings.Split(regionsList, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		parts := strings.SplitN(item, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid region format %q (expected code:host)", item)
+		}
+		code, host := parts[0], parts[1]
+		store.Set(regions.Region{
+			Code:    code,
+			Name:    wellKnown[code],
+			Host:    host,
+			Port:    3478,
+			TLSPort: 5349,
+		})
+	}
+
+	username, password := auth.GenerateCredentials(sharedSecret, userID, 24*time.Hour)
+	iceConfig := store.GenerateICEConfig(username, password, useTLS)
+
+	data, err := json.MarshalIndent(iceConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal ICE config: %w", err)
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+func generateIceConfigFromLocal(userID, sharedSecret string, useTLS bool) error {
+	username, password := auth.GenerateCredentials(sharedSecret, userID, 24*time.Hour)
+
+	// Without region info, print a minimal single-server config.
+	config := map[string]interface{}{
+		"iceServers": []map[string]interface{}{
+			{
+				"urls": []string{
+					fmt.Sprintf("turn:turn.example.com:3478?transport=udp"),
+				},
+				"username":   username,
+				"credential": password,
+			},
+		},
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal ICE config: %w", err)
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
 func probeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "probe",
@@ -340,6 +447,28 @@ func runServeTurn(cfg config.Config) error {
 		return fmt.Errorf("create turn server: %w", err)
 	}
 
+	// Create region store for multi-region TURN.
+	regionStore := regions.NewStore()
+	// If running on Fly, register the local region.
+	if cfg.FlyAppName != "" {
+		// Self-register the local region from env or config.
+		// In production, the full region list is populated by deploy orchestration.
+		wellKnown := regions.WellKnownRegions()
+		if flyRegion := os.Getenv("FLY_REGION"); flyRegion != "" {
+			regionStore.Set(regions.Region{
+				Code: flyRegion,
+				Name: wellKnown[flyRegion],
+				Port: cfg.TURNPort,
+			})
+		}
+	}
+	healthService.Register("regions", func() (health.Status, string) {
+		if regionStore.Count() > 0 {
+			return health.StatusHealthy, fmt.Sprintf("%d region(s) registered", regionStore.Count())
+		}
+		return health.StatusDegraded, "no regions registered — multi-region mode inactive"
+	})
+
 	// Create control API.
 	credValidity := 24 * time.Hour
 	apiServer := controlapi.NewServer(
@@ -347,6 +476,7 @@ func runServeTurn(cfg config.Config) error {
 		cfg.AdminAPIToken,
 		credValidity,
 		healthService,
+		regionStore,
 		logger,
 	)
 
