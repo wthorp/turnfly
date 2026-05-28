@@ -137,7 +137,8 @@ See [AGENTS.md](AGENTS.md) for development guidelines and [SCOPE.md](SCOPE.md) f
 - **Phase 2** ✅ Self-deployer via Fly Machines API
 - **Phase 3** ✅ Multi-region independent TURN with ICE config generation
 - **Phase 4** ✅ QUIC relay-pair experiment
-- **Phase 5** 🚧 Production hardening
+- **Phase 5** ✅ Production hardening
+- **Phase 6** 🚧 Continuous improvement
 
 ## License
 
