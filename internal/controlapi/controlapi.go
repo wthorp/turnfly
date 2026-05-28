@@ -4,6 +4,7 @@
 package controlapi
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -250,7 +251,7 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.Handler {
 		}
 
 		token := auth[len(bearerPrefix):]
-		if token != s.adminToken {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 			writeJSONError(w, http.StatusForbidden, "invalid admin token")
 			return
 		}

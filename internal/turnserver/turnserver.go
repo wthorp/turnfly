@@ -68,10 +68,8 @@ func (s *Server) Start(ctx context.Context) error {
 			// Note: the password is checked later by Pion via the
 			// GenerateAuthKey callback; here we just validate the
 			// username format and return the key.
-			userID, ok := auth.ValidateCredentials(username, "", s.sharedSecret)
+			userID, ok := auth.ValidateUsername(username)
 			if !ok {
-				// Check username format without password validation
-				// (the actual HMAC is checked via GenerateAuthKey).
 				metrics.AuthFailuresTotal.Inc()
 				return nil, false
 			}

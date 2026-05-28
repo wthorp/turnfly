@@ -70,6 +70,40 @@ func TestValidateCredentials(t *testing.T) {
 	}
 }
 
+func TestValidateUsername(t *testing.T) {
+	sharedSecret := "test-secret"
+	userID := "user123"
+
+	username, _ := GenerateCredentials(sharedSecret, userID, time.Hour)
+	if gotUser, ok := ValidateUsername(username); !ok {
+		t.Fatal("expected username to be valid")
+	} else if gotUser != userID {
+		t.Errorf("expected user %q, got %q", userID, gotUser)
+	}
+
+	tests := []struct {
+		name     string
+		username string
+	}{
+		{name: "missing separator", username: "bad-username"},
+		{name: "missing user", username: "9999999999:"},
+		{name: "bad expiry", username: "not-a-timestamp:user123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := ValidateUsername(tt.username); ok {
+				t.Fatalf("expected %q to be invalid", tt.username)
+			}
+		})
+	}
+
+	expiredUsername, _ := GenerateCredentials(sharedSecret, userID, -time.Hour)
+	if _, ok := ValidateUsername(expiredUsername); ok {
+		t.Fatal("expected expired username to be invalid")
+	}
+}
+
 func TestValidateCredentialsDeterministic(t *testing.T) {
 	// Test with known values to ensure HMAC is deterministic.
 	// This is useful for cross-language compatibility testing.
