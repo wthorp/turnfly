@@ -1,0 +1,40 @@
+app = "turnfly-demo"
+primary_region = "iad"
+
+[env]
+  TURN_PORT = "3478"
+  TURN_REALM = "turnfly.local"
+  # TURN_SHARED_SECRET, ADMIN_API_TOKEN set via fly secrets
+
+[[services]]
+  protocol = "udp"
+  internal_port = 3478
+
+  [[services.ports]]
+    port = 3478
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3478
+
+  [[services.ports]]
+    port = 3478
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 80
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 800
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 9090
+
+  [[services.ports]]
+    port = 9090
