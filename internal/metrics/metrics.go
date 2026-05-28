@@ -43,6 +43,22 @@ var (
 		Name: "region_candidate_wins_total",
 		Help: "Total number of times each region was chosen as the winning ICE candidate.",
 	}, []string{"region"})
+
+	// Relay metrics (Phase 4, experimental).
+	RelayQuicRTTMs = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "relay_quic_rtt_ms",
+		Help: "Current estimated relay QUIC tunnel round-trip time in milliseconds.",
+	})
+
+	RelayQuicLossEstimate = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "relay_quic_loss_estimate",
+		Help: "Estimated packet loss on the relay QUIC tunnel (0.0–1.0).",
+	})
+
+	RelayTunnelBytesTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "relay_tunnel_bytes_total",
+		Help: "Total bytes transferred through the relay tunnel.",
+	})
 )
 
 func Register() {
@@ -54,6 +70,9 @@ func Register() {
 		PacketsDroppedTotal,
 		AuthFailuresTotal,
 		RegionCandidateWinsTotal,
+		RelayQuicRTTMs,
+		RelayQuicLossEstimate,
+		RelayTunnelBytesTotal,
 	)
 }
 

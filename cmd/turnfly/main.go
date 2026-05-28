@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -31,6 +32,7 @@ import (
 	"github.com/nousresearch/turnfly/internal/health"
 	"github.com/nousresearch/turnfly/internal/metrics"
 	"github.com/nousresearch/turnfly/internal/regions"
+	"github.com/nousresearch/turnfly/internal/relay"
 	"github.com/nousresearch/turnfly/internal/turnserver"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -105,14 +107,106 @@ func serveTurnCmd() *cobra.Command {
 }
 
 func serveRelayCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		listenAddr string
+		peerAddr   string
+		server     bool
+		certFile   string
+		keyFile    string
+	)
+
+	cmd := &cobra.Command{
 		Use:   "serve-relay",
 		Short: "Start experimental relay-pair mode",
-		Long:  "Starts turnfly in experimental relay-pair mode (not implemented in Phase 1).",
+		Long: `Starts turnfly in experimental relay-pair mode.
+
+Establishes a QUIC tunnel to a peer TURN server and forwards relayed media
+packets. One side must run as --server (listener), the other as client.
+
+This is an EXPERIMENTAL feature. See SCOPE.md Phase 4 for success criteria.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("serve-relay is not yet implemented (planned for Phase 4)")
+			cfg := config.DefaultConfig()
+			cfg.LoadFromEnv()
+
+			if peerAddr == "" {
+				return fmt.Errorf("--peer is required (the remote relay peer address)")
+			}
+			if listenAddr == "" {
+				listenAddr = ":4443"
+			}
+
+			logger := setupLogger(cfg.LogLevel)
+
+			// Build TLS config for QUIC.
+			// In production, use real certificates. For experimental use,
+			// generate self-signed certs or use Fly private networking.
+			tlsCfg, err := buildRelayTLS(certFile, keyFile)
+			if err != nil {
+				return fmt.Errorf("tls config: %w", err)
+			}
+
+			tunnelCfg := relay.TunnelConfig{
+				ListenAddr: listenAddr,
+				PeerAddr:   peerAddr,
+				TLSConfig:  tlsCfg,
+				IsServer:   server,
+			}
+
+			tunnel := relay.NewTunnel(logger)
+			if err := tunnel.Connect(cmd.Context(), tunnelCfg); err != nil {
+				return fmt.Errorf("tunnel connect: %w", err)
+			}
+			defer tunnel.Close()
+
+			proxy := relay.NewProxy(tunnel, relay.DefaultProxyConfig(), logger)
+
+			logger.Info("relay mode active",
+				"peer", peerAddr,
+				"server_mode", server,
+			)
+
+			// Run the relay proxy loop.
+			return proxy.Run(cmd.Context())
 		},
 	}
+
+	cmd.Flags().StringVar(&listenAddr, "listen", ":4443", "QUIC listen address")
+	cmd.Flags().StringVar(&peerAddr, "peer", "", "Remote relay peer address (host:port)")
+	cmd.Flags().BoolVar(&server, "server", false, "Run as QUIC server (listener)")
+	cmd.Flags().StringVar(&certFile, "cert", "", "TLS certificate file (PEM)")
+	cmd.Flags().StringVar(&keyFile, "key", "", "TLS private key file (PEM)")
+
+	return cmd
+}
+
+// buildRelayTLS builds a TLS configuration for the relay QUIC tunnel.
+// If cert/key files are provided, they are used. Otherwise, a self-signed
+// certificate is generated for experimental use.
+func buildRelayTLS(certFile, keyFile string) (*tls.Config, error) {
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load key pair: %w", err)
+		}
+		return &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			NextProtos:   []string{"turnfly-relay"},
+			// InsecureSkipVerify is acceptable for Fly private networking.
+			// For public internet relay, use proper CA-signed certs.
+			InsecureSkipVerify: true,
+		}, nil
+	}
+
+	// Generate a self-signed certificate for experimental use.
+	cert, err := relay.GenerateSelfSignedCert()
+	if err != nil {
+		return nil, fmt.Errorf("generate self-signed cert: %w", err)
+	}
+	return &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		NextProtos:         []string{"turnfly-relay"},
+		InsecureSkipVerify: true,
+	}, nil
 }
 
 func deployCmd() *cobra.Command {

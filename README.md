@@ -35,7 +35,7 @@ make docker-run
 
 ```bash
 turnfly serve-turn     # Start TURN server with control API (Phase 1)
-turnfly serve-relay    # Experimental relay-pair mode (Phase 4)
+turnfly serve-relay    # Experimental relay-pair mode (Phase 4 ✅)
 turnfly deploy         # Deploy to Fly.io (Phase 2 ✅)
 turnfly destroy        # Destroy deployment (Phase 2 ✅)
 turnfly ice-config      # Generate WebRTC ICE server config (Phase 3 ✅)
@@ -136,7 +136,7 @@ See [AGENTS.md](AGENTS.md) for development guidelines and [SCOPE.md](SCOPE.md) f
 - **Phase 1** ✅ Plain Fly TURN with Pion, credential endpoint, metrics, health
 - **Phase 2** ✅ Self-deployer via Fly Machines API
 - **Phase 3** ✅ Multi-region independent TURN with ICE config generation
-- **Phase 4** 🚧 QUIC relay-pair experiment
+- **Phase 4** ✅ QUIC relay-pair experiment
 - **Phase 5** 🚧 Production hardening
 
 ## License
