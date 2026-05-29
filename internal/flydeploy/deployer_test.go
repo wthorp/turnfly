@@ -227,6 +227,68 @@ func TestDeployExistingApp(t *testing.T) {
 	}
 }
 
+func TestDeployUpdatesExistingMachine(t *testing.T) {
+	var machineUpdated bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp":
+			json.NewEncoder(w).Encode(App{ID: "app-1", Name: "myapp", Status: "created"})
+		case r.URL.Path == "/v1/apps/myapp/ip-addresses":
+			json.NewEncoder(w).Encode([]IPAddress{{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/machines":
+			json.NewEncoder(w).Encode([]Machine{
+				{
+					ID:     "m1",
+					Name:   "turnfly-iad",
+					Region: "iad",
+					State:  "started",
+					Config: MachineConfig{Image: "registry.fly.io/myapp:old"},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/myapp/machines/m1":
+			machineUpdated = true
+			var body CreateMachineRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body.Config.Image != "registry.fly.io/myapp:new" {
+				t.Errorf("expected new image, got %s", body.Config.Image)
+			}
+			json.NewEncoder(w).Encode(Machine{
+				ID:     "m1",
+				Name:   body.Name,
+				Region: body.Region,
+				State:  "started",
+				Config: body.Config,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/myapp/machines":
+			t.Fatal("expected existing machine to be updated, not recreated")
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewClient("token", false)
+	client.SetBaseURL(srv.URL)
+	d := NewDeployer(client, nil)
+
+	_, err := d.Deploy(context.Background(), DeployConfig{
+		AppName:       "myapp",
+		OrgSlug:       "myorg",
+		Regions:       []string{"iad"},
+		Image:         "registry.fly.io/myapp:new",
+		HealthTimeout: 1,
+	})
+	if err != nil {
+		t.Fatalf("Deploy() error = %v", err)
+	}
+	if !machineUpdated {
+		t.Fatal("expected existing machine to be updated")
+	}
+}
+
 func TestDestroy(t *testing.T) {
 	machinesDestroyed := 0
 

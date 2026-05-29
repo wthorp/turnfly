@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -244,15 +245,29 @@ func (d *Deployer) ensureMachine(ctx context.Context, appName, region string, cf
 	}
 
 	if existing != nil {
-		// If the machine exists and is in a good state, just start it if needed.
 		d.logger.Info("machine exists", "machine", existing.ID, "region", region, "state", existing.State)
-		if strings.EqualFold(existing.State, "stopped") {
+
+		machine := existing
+		if !reflect.DeepEqual(existing.Config, desiredConfig) {
+			d.logger.Info("updating machine config", "machine", existing.ID, "region", region)
+			updated, err := d.client.UpdateMachine(ctx, appName, existing.ID, CreateMachineRequest{
+				Name:   machineName,
+				Region: region,
+				Config: desiredConfig,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("update machine %s: %w", existing.ID, err)
+			}
+			machine = updated
+		}
+
+		if strings.EqualFold(machine.State, "stopped") {
 			d.logger.Info("starting stopped machine", "machine", existing.ID)
 			if err := d.client.StartMachine(ctx, appName, existing.ID); err != nil {
 				return nil, fmt.Errorf("start machine %s: %w", existing.ID, err)
 			}
 		}
-		return existing, nil
+		return machine, nil
 	}
 
 	// Create a new machine.

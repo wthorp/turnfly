@@ -36,11 +36,12 @@ make docker-run
 ```bash
 turnfly serve-turn     # Start TURN server with control API (Phase 1)
 turnfly serve-relay    # Experimental relay-pair mode (Phase 4 ✅)
+turnfly autodeploy     # Build, push, and deploy via APIs/SDKs
 turnfly deploy         # Deploy to Fly.io (Phase 2 ✅)
 turnfly destroy        # Destroy deployment (Phase 2 ✅)
 turnfly ice-config      # Generate WebRTC ICE server config (Phase 3 ✅)
 turnfly probe          # Synthetic measurement probes (Phase 3)
-turnfly image          # Build and push Docker image
+turnfly image push      # Build and push Docker image through Docker Engine API
 ```
 
 ## Configuration
@@ -56,6 +57,7 @@ turnfly image          # Build and push Docker image
 | LOG_LEVEL          | No       | info       | Log level (debug/info/warn/error)  |
 | FLY_APP_NAME       | No       | -          | Fly.io app name                    |
 | FLY_ORG            | No       | -          | Fly.io organization                |
+| FLY_API_TOKEN      | Deploy   | -          | Fly API token for API deploys      |
 | RELAY_MODE         | No       | false      | Enable experimental relay mode     |
 | RELAY_PEERS        | No       | -          | Comma-separated relay peer addrs   |
 
@@ -106,15 +108,41 @@ make tidy       # Run go mod tidy
 1. Install [flyctl](https://fly.io/docs/hands-on/install-flyctl/)
 2. Create a Fly.io account
 
-### Deploy
+### API Autodeploy
+
+`autodeploy` uses APIs instead of shelling out to `flyctl`. It builds and
+pushes an image through the Docker Engine API, then uses the Fly Machines API
+to create or converge the app, dedicated IPv4, and Machines.
+
+Create an org-scoped deploy token for app creation and Machines management:
 
 ```bash
-# Set secrets
-fly secrets set TURN_SHARED_SECRET="..."
-fly secrets set ADMIN_API_TOKEN="..."
+export FLY_API_TOKEN="$(fly tokens create org --name turnfly-autodeploy --expiry 720h)"
+```
 
-# Deploy
-fly deploy
+Then run:
+
+```bash
+make build
+
+./turnfly autodeploy \
+  --app your-turnfly-app \
+  --org personal \
+  --regions iad,ord
+```
+
+For debugging or CI, the image step can be run separately:
+
+```bash
+./turnfly image push --app your-turnfly-app --tag latest
+./turnfly deploy \
+  --app your-turnfly-app \
+  --org personal \
+  --regions iad,ord \
+  --image registry.fly.io/your-turnfly-app:latest \
+  --env TURN_REALM=your-turnfly-app.fly.dev \
+  --env TURN_SHARED_SECRET="..." \
+  --env ADMIN_API_TOKEN="..."
 ```
 
 ## Architecture

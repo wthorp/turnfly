@@ -131,6 +131,26 @@ func (c *Client) GetMachine(ctx context.Context, appName, machineID string) (*Ma
 	return &machine, nil
 }
 
+// UpdateMachine updates an existing Fly Machine configuration.
+func (c *Client) UpdateMachine(ctx context.Context, appName, machineID string, req CreateMachineRequest) (*Machine, error) {
+	if c.dryRun {
+		return &Machine{
+			ID:     machineID,
+			Name:   req.Name,
+			Region: req.Region,
+			State:  "dry-run",
+			Config: req.Config,
+		}, nil
+	}
+
+	var machine Machine
+	path := fmt.Sprintf("/v1/apps/%s/machines/%s", appName, machineID)
+	if err := c.doRequest(ctx, http.MethodPost, path, req, &machine); err != nil {
+		return nil, fmt.Errorf("update machine %q in app %q: %w", machineID, appName, err)
+	}
+	return &machine, nil
+}
+
 // StartMachine starts a Fly Machine.
 func (c *Client) StartMachine(ctx context.Context, appName, machineID string) error {
 	if c.dryRun {

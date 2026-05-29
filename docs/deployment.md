@@ -6,33 +6,73 @@
 2. [flyctl CLI](https://fly.io/docs/hands-on/install-flyctl/)
 3. Docker (for building images)
 
-## Quick Deploy
+## API Autodeploy
+
+The preferred turnfly workflow is API-only:
+
+1. Build and push the image through the Docker Engine API.
+2. Create or verify the Fly app through the Fly Machines API.
+3. Allocate a dedicated IPv4 for UDP.
+4. Create or update Machines in the requested regions.
+
+Create an org-scoped deploy token because first deploys may need to create the
+app and allocate resources:
 
 ```bash
-# Set required secrets
-fly secrets set TURN_SHARED_SECRET="$(openssl rand -base64 32)"
-fly secrets set ADMIN_API_TOKEN="$(openssl rand -base64 32)"
-
-# Deploy a single-region instance
-fly deploy
+export FLY_API_TOKEN="$(fly tokens create org --name turnfly-autodeploy --expiry 720h)"
 ```
 
-## Multi-Region Deploy
-
-Use the self-deployer for multi-region:
+Run a single-region deployment:
 
 ```bash
-# Build and push image
-docker build -t registry.fly.io/turnfly:latest .
-docker push registry.fly.io/turnfly:latest
+turnfly autodeploy \
+  --app my-turnfly \
+  --org personal \
+  --regions iad
+```
 
-# Deploy to multiple regions
+Run a multi-region deployment:
+
+```bash
+turnfly autodeploy \
+  --app my-turnfly \
+  --org personal \
+  --regions iad,ord,sjc,lhr
+```
+
+`autodeploy` generates `TURN_SHARED_SECRET` and `ADMIN_API_TOKEN` if they are
+not provided. To keep credentials stable across deploys, provide them explicitly:
+
+```bash
+turnfly autodeploy \
+  --app my-turnfly \
+  --org personal \
+  --regions iad,ord \
+  --turn-shared-secret "$TURN_SHARED_SECRET" \
+  --admin-api-token "$ADMIN_API_TOKEN"
+```
+
+The generated values are sent in the Machine environment through the Machines
+API. Fly app-vault secret management is still a future hardening step for this
+API-only path.
+
+## Separate Image and Deploy Steps
+
+For debugging and CI, publish the image first and deploy that immutable image:
+
+```bash
+turnfly image push \
+  --app my-turnfly \
+  --tag latest
+
 turnfly deploy \
-  --app turnfly \
+  --app my-turnfly \
   --org personal \
   --regions iad,ord,sjc,lhr \
-  --image registry.fly.io/turnfly:latest \
-  --env TURN_REALM=turnfly.example.com
+  --image registry.fly.io/my-turnfly:latest \
+  --env TURN_REALM=my-turnfly.fly.dev \
+  --env TURN_SHARED_SECRET="$TURN_SHARED_SECRET" \
+  --env ADMIN_API_TOKEN="$ADMIN_API_TOKEN"
 ```
 
 ## Region Selection Strategy
@@ -101,7 +141,11 @@ Set cost controls via Fly.io organization budgets.
 Plan deployments without creating resources:
 
 ```bash
-turnfly deploy --dry-run --regions iad,ord --image test:latest
+turnfly autodeploy \
+  --dry-run \
+  --app my-turnfly \
+  --org personal \
+  --regions iad,ord
 ```
 
 ## Teardown

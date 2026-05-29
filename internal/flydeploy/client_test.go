@@ -160,6 +160,42 @@ func TestStartStopDestroyMachine(t *testing.T) {
 	})
 }
 
+func TestUpdateMachine(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/myapp/machines/m1" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		var body CreateMachineRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body.Config.Image != "registry.fly.io/myapp:new" {
+			t.Errorf("unexpected image: %s", body.Config.Image)
+		}
+
+		json.NewEncoder(w).Encode(Machine{
+			ID:     "m1",
+			Name:   body.Name,
+			Region: body.Region,
+			State:  "started",
+			Config: body.Config,
+		})
+	})
+
+	machine, err := client.UpdateMachine(context.Background(), "myapp", "m1", CreateMachineRequest{
+		Name:   "turnfly-iad",
+		Region: "iad",
+		Config: MachineConfig{Image: "registry.fly.io/myapp:new"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateMachine() error = %v", err)
+	}
+	if machine.Config.Image != "registry.fly.io/myapp:new" {
+		t.Errorf("expected updated image, got %s", machine.Config.Image)
+	}
+}
+
 func TestAllocateIP(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(IPAddress{

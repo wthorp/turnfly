@@ -14,7 +14,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/nousresearch/turnfly/internal/auth"
 	"github.com/nousresearch/turnfly/internal/config"
+	"github.com/nousresearch/turnfly/internal/containerimage"
 	"github.com/nousresearch/turnfly/internal/controlapi"
 	"github.com/nousresearch/turnfly/internal/flydeploy"
 	"github.com/nousresearch/turnfly/internal/health"
@@ -47,6 +50,7 @@ func main() {
 
 	rootCmd.AddCommand(serveTurnCmd())
 	rootCmd.AddCommand(serveRelayCmd())
+	rootCmd.AddCommand(autodeployCmd())
 	rootCmd.AddCommand(deployCmd())
 	rootCmd.AddCommand(destroyCmd())
 	rootCmd.AddCommand(probeCmd())
@@ -209,6 +213,156 @@ func buildRelayTLS(certFile, keyFile string) (*tls.Config, error) {
 	}, nil
 }
 
+func autodeployCmd() *cobra.Command {
+	var (
+		appName      string
+		orgSlug      string
+		regionsFlag  string
+		image        string
+		tag          string
+		contextDir   string
+		dockerfile   string
+		dockerHost   string
+		dryRun       bool
+		skipImage    bool
+		turnRealm    string
+		sharedSecret string
+		adminToken   string
+		envVars      []string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "autodeploy",
+		Short: "Build, push, and deploy turnfly to Fly.io",
+		Long: `Builds and pushes a registry.fly.io image through the Docker Engine API,
+then converges the Fly app, public IP, and Machines through the Fly Machines API.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := config.DefaultConfig()
+			cfg.LoadFromEnv()
+
+			if appName != "" {
+				cfg.FlyAppName = appName
+			}
+			if orgSlug != "" {
+				cfg.FlyOrg = orgSlug
+			}
+			if cfg.FlyAPIToken == "" {
+				return fmt.Errorf("FLY_API_TOKEN is required for API autodeploy")
+			}
+			if cfg.FlyAppName == "" {
+				return fmt.Errorf("app name is required (set via FLY_APP_NAME env or --app)")
+			}
+			if cfg.FlyOrg == "" {
+				return fmt.Errorf("org slug is required (set via FLY_ORG env or --org)")
+			}
+
+			cleanRegions, err := parseRegionList(regionsFlag)
+			if err != nil {
+				return err
+			}
+
+			if image == "" {
+				if tag == "" {
+					tag = time.Now().UTC().Format("20060102-150405")
+				}
+				image = fmt.Sprintf("registry.fly.io/%s:%s", cfg.FlyAppName, tag)
+			}
+
+			env, err := parseEnvFlags(envVars)
+			if err != nil {
+				return err
+			}
+			if turnRealm == "" {
+				turnRealm = cfg.TURNRealm
+			}
+			if turnRealm == "" {
+				turnRealm = cfg.FlyAppName + ".fly.dev"
+			}
+			if sharedSecret == "" {
+				sharedSecret = cfg.TURNSharedSecret
+			}
+			if sharedSecret == "" {
+				sharedSecret, err = generateSecret(32)
+				if err != nil {
+					return fmt.Errorf("generate TURN shared secret: %w", err)
+				}
+			}
+			if adminToken == "" {
+				adminToken = cfg.AdminAPIToken
+			}
+			if adminToken == "" {
+				adminToken, err = generateSecret(32)
+				if err != nil {
+					return fmt.Errorf("generate admin token: %w", err)
+				}
+			}
+
+			env["TURN_REALM"] = turnRealm
+			env["TURN_SHARED_SECRET"] = sharedSecret
+			env["ADMIN_API_TOKEN"] = adminToken
+			env["FLY_APP_NAME"] = cfg.FlyAppName
+
+			if !dryRun && !skipImage {
+				publisher, err := containerimage.NewDockerPublisher(dockerHost)
+				if err != nil {
+					return err
+				}
+				if err := publisher.BuildAndPush(cmd.Context(), containerimage.PublishConfig{
+					ContextDir: contextDir,
+					Dockerfile: dockerfile,
+					Image:      image,
+					Token:      cfg.FlyAPIToken,
+					Output:     cmd.OutOrStdout(),
+				}); err != nil {
+					return fmt.Errorf("publish image: %w", err)
+				}
+			}
+
+			logger := setupLogger(cfg.LogLevel)
+			client := flydeploy.NewClient(cfg.FlyAPIToken, dryRun)
+			deployer := flydeploy.NewDeployer(client, logger)
+			result, err := deployer.Deploy(cmd.Context(), flydeploy.DeployConfig{
+				AppName:     cfg.FlyAppName,
+				OrgSlug:     cfg.FlyOrg,
+				Regions:     cleanRegions,
+				Image:       image,
+				Env:         env,
+				MachineName: "turnfly",
+				Guest:       flydeploy.DefaultGuest(),
+			})
+			if err != nil {
+				return fmt.Errorf("deploy failed: %w", err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "\nAutodeploy complete. App: %s\n", result.App.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Image: %s\n", image)
+			fmt.Fprintf(cmd.OutOrStdout(), "Regions: %s\n", strings.Join(result.Regions, ", "))
+			fmt.Fprintf(cmd.OutOrStdout(), "Machines: %d\n", len(result.Machines))
+			for _, ip := range result.IPs {
+				fmt.Fprintf(cmd.OutOrStdout(), "IP: %s (%s)\n", ip.Address, ip.Type)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&appName, "app", "", "Fly app name (overrides FLY_APP_NAME env)")
+	cmd.Flags().StringVar(&orgSlug, "org", "", "Fly organization slug (overrides FLY_ORG env)")
+	cmd.Flags().StringVar(&regionsFlag, "regions", "iad", "Comma-separated region list (e.g. iad,ord,lhr)")
+	cmd.Flags().StringVar(&image, "image", "", "Image reference; defaults to registry.fly.io/<app>:<timestamp>")
+	cmd.Flags().StringVar(&tag, "tag", "", "Image tag when --image is not set")
+	cmd.Flags().StringVar(&contextDir, "context", ".", "Docker build context directory")
+	cmd.Flags().StringVar(&dockerfile, "dockerfile", "Dockerfile", "Dockerfile path relative to build context")
+	cmd.Flags().StringVar(&dockerHost, "docker-host", "", "Docker Engine host (default: DOCKER_HOST or unix:///var/run/docker.sock)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Plan deployment without building, pushing, or creating resources")
+	cmd.Flags().BoolVar(&skipImage, "skip-image", false, "Skip image build/push and deploy the supplied image")
+	cmd.Flags().StringVar(&turnRealm, "turn-realm", "", "TURN realm (default: <app>.fly.dev)")
+	cmd.Flags().StringVar(&sharedSecret, "turn-shared-secret", "", "TURN shared secret; generated if omitted")
+	cmd.Flags().StringVar(&adminToken, "admin-api-token", "", "Admin API token; generated if omitted")
+	cmd.Flags().StringArrayVar(&envVars, "env", nil, "Additional environment variables (KEY=VALUE, repeatable)")
+
+	return cmd
+}
+
 func deployCmd() *cobra.Command {
 	var (
 		appName string
@@ -251,24 +405,15 @@ are left alone if they match the desired state.`,
 				return fmt.Errorf("image is required (use --image)")
 			}
 
-			regionList := strings.Split(regions, ",")
-			cleanRegions := make([]string, 0, len(regionList))
-			for _, r := range regionList {
-				if r = strings.TrimSpace(r); r != "" {
-					cleanRegions = append(cleanRegions, r)
-				}
-			}
-			if len(cleanRegions) == 0 {
-				return fmt.Errorf("at least one region is required (use --regions)")
+			cleanRegions, err := parseRegionList(regions)
+			if err != nil {
+				return err
 			}
 
 			// Build environment from --env flags.
-			env := make(map[string]string)
-			for _, e := range envVars {
-				parts := strings.SplitN(e, "=", 2)
-				if len(parts) == 2 {
-					env[parts[0]] = parts[1]
-				}
+			env, err := parseEnvFlags(envVars)
+			if err != nil {
+				return err
 			}
 
 			logger := setupLogger(cfg.LogLevel)
@@ -618,14 +763,73 @@ func runProbe(fromRegion, toHost string, dur time.Duration, packetSize, bitrateK
 }
 
 func imageCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "image",
 		Short: "Build and push Docker image",
-		Long:  "Builds and pushes the turnfly Docker image (not implemented in Phase 1).",
+		Long:  "Builds and pushes turnfly images through the Docker Engine API.",
+	}
+	cmd.AddCommand(imagePushCmd())
+	return cmd
+}
+
+func imagePushCmd() *cobra.Command {
+	var (
+		appName    string
+		image      string
+		tag        string
+		contextDir string
+		dockerfile string
+		dockerHost string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "push",
+		Short: "Build and push a registry.fly.io image",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("image is not yet implemented")
+			cfg := config.DefaultConfig()
+			cfg.LoadFromEnv()
+			if appName != "" {
+				cfg.FlyAppName = appName
+			}
+			if cfg.FlyAPIToken == "" {
+				return fmt.Errorf("FLY_API_TOKEN is required for registry push")
+			}
+			if image == "" {
+				if cfg.FlyAppName == "" {
+					return fmt.Errorf("app name is required when --image is not set")
+				}
+				if tag == "" {
+					tag = "latest"
+				}
+				image = fmt.Sprintf("registry.fly.io/%s:%s", cfg.FlyAppName, tag)
+			}
+
+			publisher, err := containerimage.NewDockerPublisher(dockerHost)
+			if err != nil {
+				return err
+			}
+			if err := publisher.BuildAndPush(cmd.Context(), containerimage.PublishConfig{
+				ContextDir: contextDir,
+				Dockerfile: dockerfile,
+				Image:      image,
+				Token:      cfg.FlyAPIToken,
+				Output:     cmd.OutOrStdout(),
+			}); err != nil {
+				return fmt.Errorf("publish image: %w", err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Image pushed: %s\n", image)
+			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&appName, "app", "", "Fly app name (overrides FLY_APP_NAME env)")
+	cmd.Flags().StringVar(&image, "image", "", "Full image reference")
+	cmd.Flags().StringVar(&tag, "tag", "latest", "Image tag when --image is not set")
+	cmd.Flags().StringVar(&contextDir, "context", ".", "Docker build context directory")
+	cmd.Flags().StringVar(&dockerfile, "dockerfile", "Dockerfile", "Dockerfile path relative to build context")
+	cmd.Flags().StringVar(&dockerHost, "docker-host", "", "Docker Engine host (default: DOCKER_HOST or unix:///var/run/docker.sock)")
+
+	return cmd
 }
 
 func setupLogger(logLevel string) *slog.Logger {
@@ -639,6 +843,40 @@ func setupLogger(logLevel string) *slog.Logger {
 		level = slog.LevelError
 	}
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+}
+
+func parseRegionList(regionsFlag string) ([]string, error) {
+	regionList := strings.Split(regionsFlag, ",")
+	cleanRegions := make([]string, 0, len(regionList))
+	for _, r := range regionList {
+		if r = strings.TrimSpace(r); r != "" {
+			cleanRegions = append(cleanRegions, r)
+		}
+	}
+	if len(cleanRegions) == 0 {
+		return nil, fmt.Errorf("at least one region is required (use --regions)")
+	}
+	return cleanRegions, nil
+}
+
+func parseEnvFlags(envVars []string) (map[string]string, error) {
+	env := make(map[string]string)
+	for _, e := range envVars {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			return nil, fmt.Errorf("invalid --env value %q (expected KEY=VALUE)", e)
+		}
+		env[parts[0]] = parts[1]
+	}
+	return env, nil
+}
+
+func generateSecret(size int) (string, error) {
+	data := make([]byte, size)
+	if _, err := rand.Read(data); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
 func runServeTurn(cfg config.Config) error {
