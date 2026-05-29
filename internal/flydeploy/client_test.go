@@ -59,10 +59,10 @@ func TestGetApp(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		json.NewEncoder(w).Encode(App{
-			ID:      "app-123",
-			Name:    "myapp",
-			OrgSlug: "myorg",
-			Status:  "created",
+			ID:           "app-123",
+			Name:         "myapp",
+			Status:       "created",
+			Organization: Organization{Slug: "myorg"},
 		})
 	})
 
@@ -72,6 +72,9 @@ func TestGetApp(t *testing.T) {
 	}
 	if app.Name != "myapp" {
 		t.Errorf("expected name myapp, got %s", app.Name)
+	}
+	if app.EffectiveOrgSlug() != "myorg" {
+		t.Errorf("expected org slug myorg, got %s", app.EffectiveOrgSlug())
 	}
 }
 

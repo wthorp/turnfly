@@ -192,18 +192,29 @@ func TestDeployCreatesAppAndMachines(t *testing.T) {
 
 func TestDeployExistingApp(t *testing.T) {
 	var appCreated bool
+	var allocateOrgSlug string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp":
-			json.NewEncoder(w).Encode(App{ID: "app-1", Name: "myapp", Status: "created"})
+			json.NewEncoder(w).Encode(App{
+				ID:           "app-1",
+				Name:         "myapp",
+				Status:       "created",
+				Organization: Organization{Slug: "actual-org"},
+			})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps":
 			appCreated = true
 			json.NewEncoder(w).Encode(App{ID: "app-2", Name: "myapp", Status: "created"})
-		case r.URL.Path == "/v1/apps/myapp/ip_assignments":
-			json.NewEncoder(w).Encode(map[string][]IPAddress{
-				"ips": {{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}},
-			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/ip_assignments":
+			json.NewEncoder(w).Encode(map[string][]IPAddress{"ips": {}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/myapp/ip_assignments":
+			var body AllocateIPRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode allocate IP body: %v", err)
+			}
+			allocateOrgSlug = body.OrgSlug
+			json.NewEncoder(w).Encode(IPAddress{ID: "ip-1", Address: "1.2.3.4", Type: "v4"})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/machines":
 			json.NewEncoder(w).Encode([]Machine{})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/myapp/machines":
@@ -235,6 +246,9 @@ func TestDeployExistingApp(t *testing.T) {
 
 	if appCreated {
 		t.Error("app should not have been created (already exists)")
+	}
+	if allocateOrgSlug != "actual-org" {
+		t.Errorf("expected IP allocation org slug actual-org, got %q", allocateOrgSlug)
 	}
 }
 

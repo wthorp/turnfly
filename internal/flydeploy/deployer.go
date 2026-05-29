@@ -92,7 +92,11 @@ func (d *Deployer) Deploy(ctx context.Context, cfg DeployConfig) (*DeployResult,
 	d.logger.Info("app ready", "app", app.Name, "status", app.Status)
 
 	// 2. Ensure public IPs exist (dedicated IPv4 for UDP).
-	ips, err := d.ensureIPs(ctx, cfg.AppName, cfg.OrgSlug)
+	ipOrgSlug := cfg.OrgSlug
+	if appOrgSlug := app.EffectiveOrgSlug(); appOrgSlug != "" {
+		ipOrgSlug = appOrgSlug
+	}
+	ips, err := d.ensureIPs(ctx, cfg.AppName, ipOrgSlug)
 	if err != nil {
 		return nil, fmt.Errorf("ensure ips: %w", err)
 	}

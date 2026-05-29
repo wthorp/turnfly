@@ -13,11 +13,27 @@ type CreateAppRequest struct {
 
 // App represents a Fly.io application.
 type App struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	OrgSlug string `json:"org_slug"`
-	Status  string `json:"status"`
-	Network string `json:"network"`
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	OrgSlug      string       `json:"org_slug"`
+	Status       string       `json:"status"`
+	Network      string       `json:"network"`
+	Organization Organization `json:"organization"`
+}
+
+// Organization represents the Fly organization that owns an app.
+type Organization struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+// EffectiveOrgSlug returns the most specific organization slug returned by
+// the Fly API.
+func (a App) EffectiveOrgSlug() string {
+	if a.Organization.Slug != "" {
+		return a.Organization.Slug
+	}
+	return a.OrgSlug
 }
 
 // CreateMachineRequest is the request body for POST /v1/apps/{app_name}/machines.
