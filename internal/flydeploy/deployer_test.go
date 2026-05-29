@@ -115,15 +115,24 @@ func TestDeployCreatesAppAndMachines(t *testing.T) {
 			} else {
 				w.WriteHeader(http.StatusNotFound)
 			}
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/ip-addresses":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/ip_assignments":
 			// List IPs — returns existing IPs after allocation.
 			if ipsAllocated {
-				json.NewEncoder(w).Encode([]IPAddress{{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}})
+				json.NewEncoder(w).Encode(map[string][]IPAddress{
+					"ips": {{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}},
+				})
 			} else {
-				json.NewEncoder(w).Encode([]IPAddress{})
+				json.NewEncoder(w).Encode(map[string][]IPAddress{"ips": {}})
 			}
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/myapp/ip-addresses":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/myapp/ip_assignments":
 			ipsAllocated = true
+			var body AllocateIPRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode allocate IP body: %v", err)
+			}
+			if body.OrgSlug != "myorg" {
+				t.Errorf("expected org slug myorg, got %q", body.OrgSlug)
+			}
 			json.NewEncoder(w).Encode(IPAddress{ID: "ip-1", Address: "1.2.3.4", Type: "v4"})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/machines":
 			json.NewEncoder(w).Encode([]Machine{})
@@ -191,8 +200,10 @@ func TestDeployExistingApp(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps":
 			appCreated = true
 			json.NewEncoder(w).Encode(App{ID: "app-2", Name: "myapp", Status: "created"})
-		case r.URL.Path == "/v1/apps/myapp/ip-addresses":
-			json.NewEncoder(w).Encode([]IPAddress{{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}})
+		case r.URL.Path == "/v1/apps/myapp/ip_assignments":
+			json.NewEncoder(w).Encode(map[string][]IPAddress{
+				"ips": {{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}},
+			})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/machines":
 			json.NewEncoder(w).Encode([]Machine{})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/myapp/machines":
@@ -234,8 +245,10 @@ func TestDeployUpdatesExistingMachine(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp":
 			json.NewEncoder(w).Encode(App{ID: "app-1", Name: "myapp", Status: "created"})
-		case r.URL.Path == "/v1/apps/myapp/ip-addresses":
-			json.NewEncoder(w).Encode([]IPAddress{{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}})
+		case r.URL.Path == "/v1/apps/myapp/ip_assignments":
+			json.NewEncoder(w).Encode(map[string][]IPAddress{
+				"ips": {{ID: "ip-1", Address: "1.2.3.4", Type: "v4"}},
+			})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp/machines":
 			json.NewEncoder(w).Encode([]Machine{
 				{

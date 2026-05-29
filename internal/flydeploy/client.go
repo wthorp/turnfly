@@ -228,9 +228,12 @@ func (c *Client) AllocateIP(ctx context.Context, appName string, req AllocateIPR
 	}
 
 	var ip IPAddress
-	path := fmt.Sprintf("/v1/apps/%s/ip-addresses", appName)
+	path := fmt.Sprintf("/v1/apps/%s/ip_assignments", appName)
 	if err := c.doRequest(ctx, http.MethodPost, path, req, &ip); err != nil {
 		return nil, fmt.Errorf("allocate ip for app %q: %w", appName, err)
+	}
+	if ip.Type == "" {
+		ip.Type = req.Type
 	}
 	return &ip, nil
 }
@@ -241,12 +244,14 @@ func (c *Client) ListIPs(ctx context.Context, appName string) ([]IPAddress, erro
 		return nil, nil
 	}
 
-	var ips []IPAddress
-	path := fmt.Sprintf("/v1/apps/%s/ip-addresses", appName)
-	if err := c.doRequest(ctx, http.MethodGet, path, nil, &ips); err != nil {
+	var resp struct {
+		IPs []IPAddress `json:"ips"`
+	}
+	path := fmt.Sprintf("/v1/apps/%s/ip_assignments", appName)
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, fmt.Errorf("list ips for app %q: %w", appName, err)
 	}
-	return ips, nil
+	return resp.IPs, nil
 }
 
 // doRequest performs an HTTP request to the Fly API.

@@ -1,6 +1,14 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/nousresearch/turnfly/internal/flydeploy"
+)
 
 func TestParseRegionList(t *testing.T) {
 	got, err := parseRegionList(" iad,ord ,, lhr ")
@@ -43,5 +51,55 @@ func TestGenerateSecret(t *testing.T) {
 	}
 	if secret == "" {
 		t.Fatal("expected non-empty secret")
+	}
+}
+
+func TestEnsureImageAppCreatesMissingApp(t *testing.T) {
+	var created bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp":
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps":
+			created = true
+			json.NewEncoder(w).Encode(flydeploy.App{Name: "myapp", OrgSlug: "personal"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	client := flydeploy.NewClient("token", false)
+	client.SetBaseURL(srv.URL)
+	if err := ensureImageApp(context.Background(), client, "myapp", "personal"); err != nil {
+		t.Fatalf("ensureImageApp() error = %v", err)
+	}
+	if !created {
+		t.Fatal("expected app to be created")
+	}
+}
+
+func TestEnsureImageAppLeavesExistingApp(t *testing.T) {
+	var created bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/apps/myapp":
+			json.NewEncoder(w).Encode(flydeploy.App{Name: "myapp", OrgSlug: "personal"})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps":
+			created = true
+			json.NewEncoder(w).Encode(flydeploy.App{Name: "myapp", OrgSlug: "personal"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	client := flydeploy.NewClient("token", false)
+	client.SetBaseURL(srv.URL)
+	if err := ensureImageApp(context.Background(), client, "myapp", "personal"); err != nil {
+		t.Fatalf("ensureImageApp() error = %v", err)
+	}
+	if created {
+		t.Fatal("existing app should not have been created")
 	}
 }

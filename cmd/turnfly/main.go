@@ -302,6 +302,16 @@ then converges the Fly app, public IP, and Machines through the Fly Machines API
 			env["ADMIN_API_TOKEN"] = adminToken
 			env["FLY_APP_NAME"] = cfg.FlyAppName
 
+			logger := setupLogger(cfg.LogLevel)
+			client := flydeploy.NewClient(cfg.FlyAPIToken, dryRun)
+			deployer := flydeploy.NewDeployer(client, logger)
+
+			if !dryRun {
+				if err := ensureImageApp(cmd.Context(), client, cfg.FlyAppName, cfg.FlyOrg); err != nil {
+					return err
+				}
+			}
+
 			if !dryRun && !skipImage {
 				publisher, err := containerimage.NewDockerPublisher(dockerHost)
 				if err != nil {
@@ -318,9 +328,6 @@ then converges the Fly app, public IP, and Machines through the Fly Machines API
 				}
 			}
 
-			logger := setupLogger(cfg.LogLevel)
-			client := flydeploy.NewClient(cfg.FlyAPIToken, dryRun)
-			deployer := flydeploy.NewDeployer(client, logger)
 			result, err := deployer.Deploy(cmd.Context(), flydeploy.DeployConfig{
 				AppName:     cfg.FlyAppName,
 				OrgSlug:     cfg.FlyOrg,
@@ -361,6 +368,16 @@ then converges the Fly app, public IP, and Machines through the Fly Machines API
 	cmd.Flags().StringArrayVar(&envVars, "env", nil, "Additional environment variables (KEY=VALUE, repeatable)")
 
 	return cmd
+}
+
+func ensureImageApp(ctx context.Context, client *flydeploy.Client, appName, orgSlug string) error {
+	if _, err := client.GetApp(ctx, appName); err == nil {
+		return nil
+	}
+	if _, err := client.CreateApp(ctx, appName, orgSlug); err != nil {
+		return fmt.Errorf("ensure app before image push: %w", err)
+	}
+	return nil
 }
 
 func deployCmd() *cobra.Command {

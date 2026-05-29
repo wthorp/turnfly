@@ -92,7 +92,7 @@ func (d *Deployer) Deploy(ctx context.Context, cfg DeployConfig) (*DeployResult,
 	d.logger.Info("app ready", "app", app.Name, "status", app.Status)
 
 	// 2. Ensure public IPs exist (dedicated IPv4 for UDP).
-	ips, err := d.ensureIPs(ctx, cfg.AppName)
+	ips, err := d.ensureIPs(ctx, cfg.AppName, cfg.OrgSlug)
 	if err != nil {
 		return nil, fmt.Errorf("ensure ips: %w", err)
 	}
@@ -192,7 +192,7 @@ func (d *Deployer) ensureApp(ctx context.Context, appName, orgSlug string) (*App
 }
 
 // ensureIPs ensures at least one public IPv4 and IPv6 are allocated.
-func (d *Deployer) ensureIPs(ctx context.Context, appName string) ([]IPAddress, error) {
+func (d *Deployer) ensureIPs(ctx context.Context, appName, orgSlug string) ([]IPAddress, error) {
 	existing, err := d.client.ListIPs(ctx, appName)
 	if err != nil {
 		return nil, err
@@ -204,7 +204,7 @@ func (d *Deployer) ensureIPs(ctx context.Context, appName string) ([]IPAddress, 
 
 	// Allocate a dedicated IPv4 for UDP.
 	d.logger.Info("allocating public IPv4", "app", appName)
-	v4, err := d.client.AllocateIP(ctx, appName, AllocateIPRequest{Type: "v4"})
+	v4, err := d.client.AllocateIP(ctx, appName, AllocateIPRequest{Type: "v4", OrgSlug: orgSlug})
 	if err != nil {
 		return nil, fmt.Errorf("allocate ipv4: %w", err)
 	}

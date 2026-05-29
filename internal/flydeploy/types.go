@@ -77,16 +77,17 @@ type Machine struct {
 // IPAddress represents a Fly.io IP address allocation.
 type IPAddress struct {
 	ID        string `json:"id"`
-	Address   string `json:"address"`
+	Address   string `json:"ip"`
 	Type      string `json:"type"` // "v4" or "v6"
 	Region    string `json:"region"`
 	CreatedAt string `json:"created_at"`
 }
 
-// AllocateIPRequest is the request body for POST /v1/apps/{app_name}/ip-addresses.
+// AllocateIPRequest is the request body for POST /v1/apps/{app_name}/ip_assignments.
 type AllocateIPRequest struct {
-	Type   string `json:"type"` // "v4" or "v6"
-	Region string `json:"region,omitempty"`
+	Type    string `json:"type"` // "v4" or "v6"
+	Region  string `json:"region,omitempty"`
+	OrgSlug string `json:"org_slug,omitempty"`
 }
 
 // WaitRequest is the query parameters for the wait endpoint.

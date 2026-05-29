@@ -198,10 +198,12 @@ func TestUpdateMachine(t *testing.T) {
 
 func TestAllocateIP(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/myapp/ip_assignments" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
 		json.NewEncoder(w).Encode(IPAddress{
 			ID:      "ip-1",
 			Address: "1.2.3.4",
-			Type:    "v4",
 		})
 	})
 
@@ -211,6 +213,28 @@ func TestAllocateIP(t *testing.T) {
 	}
 	if ip.Address != "1.2.3.4" {
 		t.Errorf("expected 1.2.3.4, got %s", ip.Address)
+	}
+	if ip.Type != "v4" {
+		t.Errorf("expected inferred type v4, got %s", ip.Type)
+	}
+}
+
+func TestListIPs(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps/myapp/ip_assignments" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string][]IPAddress{
+			"ips": {{ID: "ip-1", Address: "1.2.3.4"}},
+		})
+	})
+
+	ips, err := client.ListIPs(context.Background(), "myapp")
+	if err != nil {
+		t.Fatalf("ListIPs() error = %v", err)
+	}
+	if len(ips) != 1 || ips[0].Address != "1.2.3.4" {
+		t.Fatalf("unexpected IP list: %#v", ips)
 	}
 }
 
